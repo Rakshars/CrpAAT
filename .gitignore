@@ -1,0 +1,35 @@
+# === Python Ignore Files ===
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.venv/
+venv/
+ENV/
+env/
+
+# === React Frontend Ignore Files ===
+dashboard/node_modules/
+dashboard/dist/
+dashboard/.env
+dashboard/.env.local
+dashboard/.env.development.local
+dashboard/.env.test.local
+dashboard/.env.production.local
+
+# === OS & IDE Ignore Files ===
+.DS_Store
+.DS_Store?
+ehthumbs.db
+Thumbs.db
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.swp
+
+# === Local Telemetry & Decoys ===
+decoy_passwords.db
+*.log
