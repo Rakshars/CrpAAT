@@ -1012,6 +1012,13 @@ def make_http_handler_class(server_instance):
             self.end_headers()
             self.wfile.write(b"Not Found")
 
+        def do_OPTIONS(self):
+            self.send_response(200)
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+            self.send_header('Access-Control-Allow-Headers', 'Content-Type')
+            self.end_headers()
+
         def do_POST(self):
             parsed_path = urllib.parse.urlparse(self.path)
 
@@ -1029,6 +1036,7 @@ def make_http_handler_class(server_instance):
                     resp = json.dumps({'error': 'Client is busy. Please wait.'}).encode('utf-8')
                     self.send_response(429)
                     self.send_header('Content-Type', 'application/json')
+                    self.send_header('Access-Control-Allow-Origin', '*')
                     self.send_header('Content-Length', str(len(resp)))
                     self.end_headers()
                     self.wfile.write(resp)
@@ -1045,6 +1053,7 @@ def make_http_handler_class(server_instance):
                 resp = json.dumps({'status': 'accepted', 'action': body.get('action')}).encode('utf-8')
                 self.send_response(202)
                 self.send_header('Content-Type', 'application/json')
+                self.send_header('Access-Control-Allow-Origin', '*')
                 self.send_header('Content-Length', str(len(resp)))
                 self.end_headers()
                 self.wfile.write(resp)

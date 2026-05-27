@@ -796,12 +796,15 @@
 </div>
 
 <script>
+    // ── Dynamic Host Resolver (handles file:// protocols) ──────────────
+    const baseApi = window.location.protocol === 'file:' ? 'http://localhost:8080' : '';
+
     // ── State ─────────────────────────────────────────────────────────
     let autoScroll = true;
     let isBusy = false;
 
     // ── SSE: stream client logs from server ───────────────────────────
-    const es = new EventSource('/client-events');
+    const es = new EventSource(baseApi + '/client-events');
 
     es.onmessage = function(e) {
         try {
@@ -959,7 +962,7 @@
     async function postAction(body) {
         if (isBusy) return;
         try {
-            const r = await fetch('/client-action', {
+            const r = await fetch(baseApi + '/client-action', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(body)
