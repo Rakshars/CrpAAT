@@ -183,10 +183,39 @@ class AdaptiveSecureServer:
             server.client_log(tag, message, css)
         client.log = patched_log
 
-    def get_or_create_client(self):
+    def get_or_create_client(self, force_reconnect=False):
         """Return the managed client, creating+connecting if needed."""
+        # Check if current client socket is alive
+        is_alive = False
+        if self.managed_client and self.managed_client.sock:
+            try:
+                # Quick non-blocking check to see if socket is closed
+                self.managed_client.sock.setblocking(False)
+                data = self.managed_client.sock.recv(1, socket.MSG_PEEK)
+                if data == b'':
+                    is_alive = False
+                else:
+                    is_alive = True
+            except BlockingIOError:
+                # Socket is alive, just no data available
+                is_alive = True
+            except Exception:
+                is_alive = False
+            finally:
+                if self.managed_client and self.managed_client.sock:
+                    self.managed_client.sock.setblocking(True)
+                    
+        if force_reconnect or not is_alive:
+            if self.managed_client:
+                try:
+                    self.managed_client.close()
+                except Exception:
+                    pass
+                self.managed_client = None
+
         if self.managed_client and self.managed_client.sock:
             return self.managed_client
+
         c = AdaptiveSecureClient(host='127.0.0.1', port=9999)
         self._patch_client_logger(c)
         if c.connect():
@@ -210,7 +239,8 @@ class AdaptiveSecureServer:
         self.broadcast_client_msg({'type': 'busy', 'running': True})
 
         try:
-            c = self.get_or_create_client()
+            # If doing key exchange, force reconnect to clean up any dead sockets
+            c = self.get_or_create_client(force_reconnect=(action == 'key_exchange'))
             if c is None:
                 self.client_log('ERROR', 'No active connection. Cannot execute action.', 'msg-alarm')
                 return
@@ -391,9 +421,12 @@ class AdaptiveSecureServer:
             )
             self.broadcast_sse("threat_change", {"threat_level": self.threat_level})
 
-    def handle_client_tcp(self, conn, addr):
+    def handle_client_tcp(self, conn_sock, addr):
         ip = addr[0]
         self.log_event("NETWORK", f"New TCP connection established from client at {ip}.", "info")
+        
+        # Create line-oriented file object over the socket
+        conn = conn_sock.makefile('rwb', buffering=0)
         
         session_aes_key = None
         username = None
@@ -751,6 +784,7 @@ class AdaptiveSecureServer:
             traceback.print_exc()
         finally:
             conn.close()
+            conn_sock.close()
             if ip in self.sessions:
                 del self.sessions[ip]
             self.log_event("NETWORK", f"TCP socket closed for {ip}.", "info")
@@ -1084,10 +1118,7 @@ def run_tcp_server(server_instance):
     while True:
         try:
             conn, addr = s.accept()
-            # Wrap in line-oriented file object
-            # socket.makefile permits readline() usage over socket stream
-            rfile = conn.makefile('rwb', buffering=0)
-            t = threading.Thread(target=server_instance.handle_client_tcp, args=(rfile, addr), daemon=True)
+            t = threading.Thread(target=server_instance.handle_client_tcp, args=(conn, addr), daemon=True)
             t.start()
         except Exception as e:
             print(f"[-] TCP accept exception: {e}")

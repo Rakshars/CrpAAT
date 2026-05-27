@@ -77,7 +77,7 @@ def run_test():
             headers={'Content-Type': 'application/json'}
         )
         urllib.request.urlopen(brute_req)
-        time.sleep(6) # wait for brute force iterations to run and IP to lock (threat level escalates)
+        time.sleep(10) # wait for brute force iterations to run and IP to lock (threat level escalates)
 
         # Step 2. Trigger Honeypot Probe login (takes us to level 3)
         print("[*] Probing Honeypot Trap...")
@@ -128,8 +128,19 @@ def run_test():
         else:
             print("[-] FAILED: decoy_financials.pdf not found.")
 
+        # Step 4. Cleanup and Reset
+        print("[*] Cleaning up and resetting threat level...")
+        cleanup_req = urllib.request.Request(
+            "http://localhost:8080/client-action", 
+            data=json.dumps({"action": "disconnect"}).encode('utf-8'),
+            headers={'Content-Type': 'application/json'}
+        )
+        urllib.request.urlopen(cleanup_req)
+        time.sleep(1)
+
     except Exception as e:
         print(f"[-] TEST 2 Exception: {e}")
 
 if __name__ == "__main__":
     run_test()
+

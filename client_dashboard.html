@@ -931,7 +931,7 @@
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; padding-bottom:10px; border-bottom:1px solid rgba(255,255,255,0.08);">
                     <div style="font-family:'Outfit', sans-serif; text-align:left;">
                         <span style="font-weight:800; color:#fff; font-size:0.9rem;">📄 File: ${filename}</span>
-                        <br><small style="color:var(--text-secondary); font-size:0.75rem;">Size: ~${~?(base64Data.length * 0.75 / 1024) : 10} KB | Type: Adobe PDF Document</small>
+                        <br><small style="color:var(--text-secondary); font-size:0.75rem;">Size: ~${~~(base64Data.length * 0.75 / 1024)} KB | Type: Adobe PDF Document</small>
                     </div>
                     <a href="data:application/pdf;base64,${base64Data}" download="${filename}" class="terminal-action-btn" style="text-decoration:none; display:inline-flex; align-items:center; gap:6px; background:rgba(0,240,255,0.12); border-color:var(--neon-cyan); color:var(--neon-cyan); padding:6px 14px; font-weight:700; border-radius:6px; transition:all 0.25s;">
                         📥 Download PDF
@@ -1056,11 +1056,16 @@
     });
 
     // ── Auto-Connect on Page Load ─────────────────────────────────────
-    window.addEventListener('DOMContentLoaded', () => {
+    function initAutoConnect() {
         setTimeout(() => {
             doKeyExchange();
         }, 600);
-    });
+    }
+    if (document.readyState === 'loading') {
+        window.addEventListener('DOMContentLoaded', initAutoConnect);
+    } else {
+        initAutoConnect();
+    }
 </script>
 </body>
 </html>
