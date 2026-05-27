@@ -1054,6 +1054,13 @@
     document.getElementById('chatMessage').addEventListener('keydown', e => {
         if (e.key === 'Enter') submitChat();
     });
+
+    // ── Auto-Connect on Page Load ─────────────────────────────────────
+    window.addEventListener('DOMContentLoaded', () => {
+        setTimeout(() => {
+            doKeyExchange();
+        }, 600);
+    });
 </script>
 </body>
 </html>
