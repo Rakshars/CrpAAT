@@ -483,59 +483,20 @@ def show_menu():
 """)
 
 def main():
-    host = '127.0.0.1'
-    if len(sys.argv) > 1:
-        host = sys.argv[1]
-        
-    client = AdaptiveSecureClient(host=host, port=9999)
     print_banner()
     
-    if not client.connect():
-        print(f"{Colors.RED}[-] Server offline or unreachable at {host}:9999. Start server.py first!{Colors.END}")
-        return
-        
+    print(f"\n{Colors.GREEN}[*] Redirecting Interactive Client Control to browser-based Dashboard...{Colors.END}")
+    print(f"{Colors.GREEN}[+] Real-time log streams & cryptographic telemetries are fully armed!{Colors.END}")
+    
+    print(f"\n{Colors.BOLD}{Colors.CYAN}👉 Click this link to open the Client Operations Dashboard:{Colors.END}")
+    print(f"   {Colors.BOLD}{Colors.GREEN}http://localhost:8080/client{Colors.END}")
+    
+    print(f"\n{Colors.YELLOW}(Please ensure 'python server.py' is running in the background.){Colors.END}")
+    
     try:
-        while True:
-            show_menu()
-            choice = input(f"{Colors.BOLD}Select operation [1-9]: {Colors.END}").strip()
-            
-            if choice == "1":
-                client.do_key_exchange()
-            elif choice == "2":
-                if not client.aes_key:
-                    print(f"{Colors.RED}Please establish secure key exchange (Option 1) first!{Colors.END}")
-                    continue
-                u = input("Username: ").strip()
-                p = input("Password: ").strip()
-                client.do_login(u, p)
-            elif choice == "3":
-                if not client.aes_key:
-                    print(f"{Colors.RED}Please establish secure key exchange (Option 1) first!{Colors.END}")
-                    continue
-                msg = input("Message: ").strip()
-                client.do_send_message(msg)
-            elif choice == "4":
-                client.do_get_classified_financials()
-            elif choice == "5":
-                client.do_tamper_demo()
-            elif choice == "6":
-                client.run_brute_force()
-            elif choice == "7":
-                client.run_replay_attack()
-            elif choice == "8":
-                client.check_honeypot_trap()
-            elif choice == "9":
-                print(f"{Colors.GREEN}[+] Thank you for using Cryptoshield Client. Goodbye!{Colors.END}")
-                break
-            else:
-                print(f"{Colors.RED}Invalid selection. Choose [1-9].{Colors.END}")
-                
-            input(f"\n{Colors.BOLD}Press Enter to continue...{Colors.END}")
-            
+        input(f"\n{Colors.BOLD}Press Enter to exit...{Colors.END}")
     except KeyboardInterrupt:
-        print(f"\n{Colors.YELLOW}[*] Keyboard Interrupt. Closing connection.{Colors.END}")
-    finally:
-        client.close()
+        pass
 
 if __name__ == '__main__':
     main()
