@@ -1,0 +1,1031 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Adaptive CryptoShield — Client Operations Terminal</title>
+    <meta name="description" content="Browser-based client control panel for the Adaptive CryptoShield security emulator. Trigger key exchange, login, attacks and defenses from the web UI.">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;600;800&family=Outfit:wght@300;400;600;800;900&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-base:       #06040c;
+            --bg-panel:      rgba(14, 10, 24, 0.75);
+            --bg-card:       rgba(255,255,255,0.025);
+            --border-subtle: rgba(255,255,255,0.06);
+            --text-primary:  #eee8f8;
+            --text-secondary:#9588a8;
+
+            /* Neon palette */
+            --neon-cyan:    #00f0ff;
+            --neon-green:   #00e676;
+            --neon-yellow:  #ffb800;
+            --neon-red:     #ff1744;
+            --neon-magenta: #ff007f;
+            --neon-purple:  #b94fff;
+            --neon-orange:  #ff6d00;
+
+            /* Phase accent */
+            --phase1-accent: var(--neon-cyan);
+            --phase2-accent: var(--neon-red);
+        }
+
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            font-family: 'Outfit', sans-serif;
+            background-color: var(--bg-base);
+            color: var(--text-primary);
+            min-height: 100vh;
+            overflow-x: hidden;
+            background-image:
+                radial-gradient(circle at 5%  15%, rgba(0,240,255,0.07)   0%, transparent 40%),
+                radial-gradient(circle at 95% 85%, rgba(185,79,255,0.07)  0%, transparent 40%),
+                radial-gradient(circle at 50% 50%, rgba(255,23,68,0.04)   0%, transparent 60%);
+            background-attachment: fixed;
+        }
+
+        /* ── HEADER ─────────────────────────────────────────────── */
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 18px 36px;
+            border-bottom: 1px solid var(--border-subtle);
+            backdrop-filter: blur(12px);
+            background: rgba(6,4,12,0.85);
+            position: sticky;
+            top: 0;
+            z-index: 200;
+        }
+
+        .brand { display: flex; align-items: center; gap: 14px; }
+        .brand-icon { font-size: 2rem; filter: drop-shadow(0 0 10px var(--neon-cyan)); }
+        .brand-text h1 {
+            font-size: 1.4rem;
+            font-weight: 900;
+            background: linear-gradient(90deg, #fff 30%, var(--neon-cyan));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            letter-spacing: .5px;
+        }
+        .brand-text p {
+            font-size: .7rem;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            color: var(--text-secondary);
+        }
+
+        .header-right { display: flex; gap: 14px; align-items: center; }
+
+        .status-pill {
+            display: flex;
+            align-items: center;
+            gap: 7px;
+            border-radius: 20px;
+            padding: 5px 14px;
+            font-size: .78rem;
+            font-weight: 700;
+            border: 1px solid;
+            transition: all .4s;
+        }
+        .status-pill.connected    { color: var(--neon-green);  background: rgba(0,230,118,.08); border-color: rgba(0,230,118,.25); }
+        .status-pill.disconnected { color: var(--neon-red);    background: rgba(255,23,68,.08); border-color: rgba(255,23,68,.25); }
+        .status-pill.busy         { color: var(--neon-yellow); background: rgba(255,184,0,.08); border-color: rgba(255,184,0,.25); }
+
+        .pulse-dot {
+            width: 7px; height: 7px;
+            border-radius: 50%;
+            background: currentColor;
+            animation: beacon 1.5s infinite;
+        }
+        @keyframes beacon {
+            0%,100% { transform: scale(.9); opacity: .5; }
+            50%      { transform: scale(1.4); opacity: 1; box-shadow: 0 0 8px currentColor; }
+        }
+
+        .server-link-btn {
+            font-size: .78rem;
+            font-weight: 700;
+            color: var(--neon-purple);
+            border: 1px solid rgba(185,79,255,.25);
+            background: rgba(185,79,255,.07);
+            border-radius: 20px;
+            padding: 5px 14px;
+            text-decoration: none;
+            transition: all .25s;
+        }
+        .server-link-btn:hover { background: rgba(185,79,255,.18); border-color: var(--neon-purple); }
+
+        /* ── STATUS BAR ──────────────────────────────────────────── */
+        .status-bar {
+            display: flex;
+            gap: 0;
+            background: rgba(0,0,0,.35);
+            border-bottom: 1px solid var(--border-subtle);
+            font-family: 'JetBrains Mono', monospace;
+            font-size: .72rem;
+            overflow: hidden;
+        }
+        .status-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 22px;
+            border-right: 1px solid var(--border-subtle);
+            white-space: nowrap;
+        }
+        .status-item label { color: var(--text-secondary); }
+        .status-item span  { color: var(--text-primary); font-weight: 600; }
+        .status-item span.ok  { color: var(--neon-green); }
+        .status-item span.no  { color: var(--neon-red); }
+        .status-item span.pending { color: var(--neon-yellow); }
+
+        /* ── GRID ────────────────────────────────────────────────── */
+        .dashboard {
+            max-width: 1500px;
+            margin: 0 auto;
+            padding: 28px 30px;
+            display: grid;
+            grid-template-columns: 340px 1fr;
+            gap: 24px;
+        }
+
+        /* ── PANEL BASE ──────────────────────────────────────────── */
+        .panel {
+            background: var(--bg-panel);
+            backdrop-filter: blur(18px) saturate(160%);
+            border: 1px solid var(--border-subtle);
+            border-radius: 16px;
+            padding: 22px;
+            box-shadow: 0 8px 32px rgba(0,0,0,.5);
+            position: relative;
+            overflow: hidden;
+        }
+        .panel::before {
+            content: '';
+            position: absolute;
+            top: 0; left: 0; right: 0;
+            height: 2px;
+            background: linear-gradient(90deg, transparent, var(--neon-cyan), transparent);
+            opacity: .5;
+        }
+
+        .panel-title {
+            font-size: .85rem;
+            font-weight: 800;
+            text-transform: uppercase;
+            letter-spacing: 1.5px;
+            color: #fff;
+            display: flex;
+            align-items: center;
+            gap: 9px;
+            margin-bottom: 18px;
+            padding-bottom: 12px;
+            border-bottom: 1px solid var(--border-subtle);
+        }
+        .panel-title .icon { color: var(--neon-cyan); }
+
+        /* ── PHASE SECTION HEADERS ───────────────────────────────── */
+        .phase-header {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin: 16px 0 10px;
+            font-size: .72rem;
+            font-weight: 800;
+            text-transform: uppercase;
+            letter-spacing: 1.5px;
+        }
+        .phase-header.phase1 { color: var(--neon-cyan); }
+        .phase-header.phase2 { color: var(--neon-red); }
+        .phase-header::after {
+            content: '';
+            flex: 1;
+            height: 1px;
+            background: currentColor;
+            opacity: .25;
+        }
+
+        /* ── OPERATION BUTTONS ───────────────────────────────────── */
+        .op-btn {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            width: 100%;
+            padding: 13px 14px;
+            border-radius: 10px;
+            border: 1px solid;
+            background: transparent;
+            cursor: pointer;
+            font-family: 'Outfit', sans-serif;
+            font-size: .88rem;
+            font-weight: 700;
+            text-align: left;
+            transition: all .2s cubic-bezier(.4,0,.2,1);
+            margin-bottom: 8px;
+            position: relative;
+            overflow: hidden;
+        }
+        .op-btn::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background: currentColor;
+            opacity: 0;
+            transition: opacity .2s;
+        }
+        .op-btn:hover::before { opacity: .06; }
+        .op-btn:active { transform: scale(.98); }
+        .op-btn:disabled { opacity: .4; cursor: not-allowed; }
+        .op-btn:disabled::before { display: none; }
+
+        .op-btn .btn-num {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: .7rem;
+            font-weight: 800;
+            min-width: 22px;
+            text-align: center;
+            opacity: .7;
+        }
+        .op-btn .btn-label { flex: 1; }
+        .op-btn .btn-arrow { opacity: .4; font-size: .8rem; transition: transform .2s, opacity .2s; }
+        .op-btn:hover .btn-arrow { opacity: 1; transform: translateX(3px); }
+
+        /* Phase 1 buttons — cyan/green tones */
+        .btn-p1 { color: var(--neon-cyan); border-color: rgba(0,240,255,.2); }
+        .btn-p1:hover { border-color: rgba(0,240,255,.5); box-shadow: 0 0 16px rgba(0,240,255,.12); }
+
+        .btn-login  { color: var(--neon-green); border-color: rgba(0,230,118,.2); }
+        .btn-login:hover { border-color: rgba(0,230,118,.5); box-shadow: 0 0 16px rgba(0,230,118,.12); }
+
+        .btn-chat   { color: var(--neon-purple); border-color: rgba(185,79,255,.2); }
+        .btn-chat:hover { border-color: rgba(185,79,255,.5); box-shadow: 0 0 16px rgba(185,79,255,.12); }
+
+        .btn-file   { color: var(--neon-yellow); border-color: rgba(255,184,0,.2); }
+        .btn-file:hover { border-color: rgba(255,184,0,.5); box-shadow: 0 0 16px rgba(255,184,0,.12); }
+
+        .btn-tamper { color: var(--neon-orange); border-color: rgba(255,109,0,.2); }
+        .btn-tamper:hover { border-color: rgba(255,109,0,.5); box-shadow: 0 0 16px rgba(255,109,0,.12); }
+
+        /* Phase 2 buttons — red/magenta */
+        .btn-p2 { color: var(--neon-red); border-color: rgba(255,23,68,.2); }
+        .btn-p2:hover { border-color: rgba(255,23,68,.5); box-shadow: 0 0 16px rgba(255,23,68,.15); }
+
+        .btn-replay  { color: var(--neon-magenta); border-color: rgba(255,0,127,.2); }
+        .btn-replay:hover { border-color: rgba(255,0,127,.5); box-shadow: 0 0 16px rgba(255,0,127,.15); }
+
+        .btn-honeypot { color: #d040fb; border-color: rgba(208,64,251,.2); }
+        .btn-honeypot:hover { border-color: rgba(208,64,251,.5); box-shadow: 0 0 16px rgba(208,64,251,.15); }
+
+        /* System */
+        .btn-sys { color: var(--text-secondary); border-color: rgba(255,255,255,.1); }
+        .btn-sys:hover { border-color: rgba(255,255,255,.25); }
+
+        /* ── INLINE INPUT FORMS ───────────────────────────────────── */
+        .inline-form {
+            display: none;
+            flex-direction: column;
+            gap: 8px;
+            background: rgba(0,0,0,.3);
+            border: 1px solid rgba(255,255,255,.07);
+            border-radius: 10px;
+            padding: 14px;
+            margin-bottom: 10px;
+            animation: fadeDown .2s ease;
+        }
+        .inline-form.open { display: flex; }
+        @keyframes fadeDown {
+            from { opacity: 0; transform: translateY(-8px); }
+            to   { opacity: 1; transform: translateY(0); }
+        }
+
+        .form-row { display: flex; gap: 8px; align-items: center; }
+        .form-row label {
+            font-size: .72rem;
+            color: var(--text-secondary);
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            min-width: 65px;
+        }
+        .form-input {
+            flex: 1;
+            background: rgba(255,255,255,.04);
+            border: 1px solid rgba(255,255,255,.1);
+            border-radius: 6px;
+            padding: 7px 10px;
+            color: var(--text-primary);
+            font-family: 'JetBrains Mono', monospace;
+            font-size: .8rem;
+            outline: none;
+            transition: border-color .2s;
+        }
+        .form-input:focus { border-color: var(--neon-cyan); }
+        .form-input::placeholder { color: var(--text-secondary); opacity: .6; }
+
+        .form-submit {
+            align-self: flex-end;
+            padding: 7px 18px;
+            border-radius: 6px;
+            border: 1px solid var(--neon-cyan);
+            background: rgba(0,240,255,.08);
+            color: var(--neon-cyan);
+            font-family: 'Outfit', sans-serif;
+            font-weight: 700;
+            font-size: .8rem;
+            cursor: pointer;
+            transition: all .2s;
+        }
+        .form-submit:hover { background: rgba(0,240,255,.18); }
+
+        /* ── RIGHT COLUMN (TERMINAL + RESULT) ───────────────────── */
+        .right-col { display: flex; flex-direction: column; gap: 22px; }
+
+        /* ── LIVE TERMINAL ───────────────────────────────────────── */
+        .terminal-panel { flex: 1; display: flex; flex-direction: column; }
+        .terminal-panel::before {
+            background: linear-gradient(90deg, transparent, var(--neon-green), transparent);
+        }
+
+        .terminal-toolbar {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 14px;
+        }
+        .terminal-dots { display: flex; gap: 6px; }
+        .dot { width: 12px; height: 12px; border-radius: 50%; }
+        .dot-red    { background: #ff5f57; }
+        .dot-yellow { background: #febc2e; }
+        .dot-green  { background: #28c840; }
+
+        .terminal-title-bar {
+            flex: 1;
+            background: rgba(0,0,0,.4);
+            border-radius: 6px;
+            padding: 4px 12px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: .72rem;
+            color: var(--text-secondary);
+            letter-spacing: 1px;
+        }
+
+        .terminal-action-btn {
+            font-size: .72rem;
+            font-weight: 700;
+            color: var(--text-secondary);
+            border: 1px solid rgba(255,255,255,.1);
+            background: rgba(255,255,255,.03);
+            border-radius: 6px;
+            padding: 4px 10px;
+            cursor: pointer;
+            transition: all .2s;
+            font-family: 'Outfit', sans-serif;
+        }
+        .terminal-action-btn:hover { color: var(--text-primary); border-color: rgba(255,255,255,.25); }
+
+        .terminal-output {
+            flex: 1;
+            background: #030208;
+            border: 1px solid rgba(0,240,255,.08);
+            border-radius: 10px;
+            padding: 14px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: .76rem;
+            height: 480px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            scrollbar-width: thin;
+            scrollbar-color: rgba(0,240,255,.2) transparent;
+        }
+
+        .log-line {
+            display: flex;
+            gap: 10px;
+            line-height: 1.5;
+            padding: 1px 0;
+            animation: logSlide .15s ease;
+        }
+        @keyframes logSlide {
+            from { opacity: 0; transform: translateX(-6px); }
+            to   { opacity: 1; transform: translateX(0); }
+        }
+
+        .log-time { color: #3d3550; flex-shrink: 0; }
+        .log-tag  { font-weight: 800; flex-shrink: 0; min-width: 80px; }
+        .log-msg  { color: var(--text-primary); word-break: break-all; }
+
+        .tag-NETWORK  { color: #7e7294; }
+        .tag-CRYPTO   { color: var(--neon-purple); }
+        .tag-SECURE   { color: var(--neon-green); }
+        .tag-ATTACK   { color: var(--neon-red); }
+        .tag-DEFENSE  { color: var(--neon-yellow); }
+        .tag-HONEYPOT { color: #e040fb; }
+        .tag-INFO     { color: var(--neon-cyan); }
+        .tag-ERROR    { color: var(--neon-red); }
+        .tag-SYSTEM   { color: var(--neon-cyan); }
+        .tag-CHAT     { color: var(--neon-purple); }
+
+        .msg-secure  { color: #c8e6c9; }
+        .msg-warning { color: #ffe082; }
+        .msg-alarm   { color: #ff8a80; font-weight: 600; }
+        .msg-info    { color: var(--text-primary); }
+        .msg-honeypot{ color: #f3e5f5; font-style: italic; }
+
+        /* ── RESULT / FILE VIEWER ─────────────────────────────────── */
+        .result-panel { }
+        .result-panel::before {
+            background: linear-gradient(90deg, transparent, var(--neon-yellow), transparent);
+        }
+
+        .result-content {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: .78rem;
+            background: rgba(0,0,0,.4);
+            border: 1px solid rgba(255,184,0,.1);
+            border-radius: 8px;
+            padding: 14px;
+            min-height: 90px;
+            max-height: 220px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            word-break: break-all;
+            color: var(--neon-yellow);
+        }
+        .result-placeholder { color: var(--text-secondary); font-style: italic; }
+
+        .result-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            font-size: .72rem;
+            font-weight: 700;
+            padding: 3px 10px;
+            border-radius: 10px;
+            margin-bottom: 10px;
+        }
+        .badge-success { background: rgba(0,230,118,.12); color: var(--neon-green); border: 1px solid rgba(0,230,118,.25); }
+        .badge-error   { background: rgba(255,23,68,.12);  color: var(--neon-red);   border: 1px solid rgba(255,23,68,.25); }
+        .badge-warn    { background: rgba(255,184,0,.12);  color: var(--neon-yellow);border: 1px solid rgba(255,184,0,.25); }
+        .badge-hidden  { display: none; }
+
+        /* ── BUSY OVERLAY ─────────────────────────────────────────── */
+        .busy-bar {
+            height: 3px;
+            background: linear-gradient(90deg, var(--neon-cyan), var(--neon-purple), var(--neon-cyan));
+            background-size: 200% auto;
+            border-radius: 99px;
+            animation: busyScan 1.2s linear infinite;
+            display: none;
+            margin-bottom: 10px;
+        }
+        .busy-bar.running { display: block; }
+        @keyframes busyScan {
+            0%   { background-position: 0%; }
+            100% { background-position: 200%; }
+        }
+
+        /* ── MODAL ────────────────────────────────────────────────── */
+        .modal-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,.65);
+            backdrop-filter: blur(6px);
+            z-index: 500;
+            display: none;
+            align-items: center;
+            justify-content: center;
+        }
+        .modal-overlay.open { display: flex; }
+
+        .modal-box {
+            background: #0d0918;
+            border: 1px solid rgba(0,240,255,.2);
+            border-radius: 16px;
+            padding: 28px;
+            width: 420px;
+            box-shadow: 0 20px 60px rgba(0,0,0,.7), 0 0 0 1px rgba(0,240,255,.05);
+            animation: modalIn .25s cubic-bezier(.34,1.56,.64,1);
+        }
+        @keyframes modalIn {
+            from { opacity: 0; transform: scale(.92) translateY(12px); }
+            to   { opacity: 1; transform: scale(1)   translateY(0); }
+        }
+
+        .modal-title {
+            font-size: 1rem;
+            font-weight: 800;
+            color: var(--neon-cyan);
+            margin-bottom: 20px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .modal-field { margin-bottom: 14px; }
+        .modal-field label {
+            display: block;
+            font-size: .72rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: var(--text-secondary);
+            margin-bottom: 6px;
+        }
+        .modal-field input {
+            width: 100%;
+            background: rgba(255,255,255,.04);
+            border: 1px solid rgba(255,255,255,.12);
+            border-radius: 8px;
+            padding: 10px 14px;
+            color: var(--text-primary);
+            font-family: 'JetBrains Mono', monospace;
+            font-size: .85rem;
+            outline: none;
+            transition: border-color .2s;
+        }
+        .modal-field input:focus { border-color: var(--neon-cyan); box-shadow: 0 0 0 3px rgba(0,240,255,.08); }
+
+        .hint-text {
+            font-size: .7rem;
+            color: var(--text-secondary);
+            margin-top: 4px;
+        }
+        .hint-text code {
+            color: var(--neon-yellow);
+            background: rgba(255,184,0,.08);
+            padding: 1px 5px;
+            border-radius: 4px;
+        }
+
+        .modal-actions { display: flex; gap: 10px; margin-top: 20px; justify-content: flex-end; }
+        .modal-btn {
+            padding: 9px 22px;
+            border-radius: 8px;
+            border: 1px solid;
+            font-family: 'Outfit', sans-serif;
+            font-weight: 700;
+            font-size: .85rem;
+            cursor: pointer;
+            transition: all .2s;
+        }
+        .modal-btn.primary {
+            background: rgba(0,240,255,.1);
+            border-color: rgba(0,240,255,.4);
+            color: var(--neon-cyan);
+        }
+        .modal-btn.primary:hover { background: rgba(0,240,255,.2); }
+        .modal-btn.cancel {
+            background: transparent;
+            border-color: rgba(255,255,255,.12);
+            color: var(--text-secondary);
+        }
+        .modal-btn.cancel:hover { border-color: rgba(255,255,255,.3); color: var(--text-primary); }
+
+        /* ── SCROLLBAR ────────────────────────────────────────────── */
+        ::-webkit-scrollbar { width: 5px; height: 5px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: rgba(255,255,255,.1); border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,.22); }
+    </style>
+</head>
+<body>
+
+<!-- ── HEADER ──────────────────────────────────────────────────────── -->
+<header>
+    <div class="brand">
+        <div class="brand-icon">💻</div>
+        <div class="brand-text">
+            <h1>Adaptive CryptoShield — Client Terminal</h1>
+            <p>Interactive Attack &amp; Defense Operations Dashboard</p>
+        </div>
+    </div>
+    <div class="header-right">
+        <div id="connPill" class="status-pill disconnected">
+            <span class="pulse-dot"></span>
+            <span id="connLabel">DISCONNECTED</span>
+        </div>
+        <a href="/" class="server-link-btn">🛡️ Server Dashboard</a>
+    </div>
+</header>
+
+<!-- ── STATUS BAR ──────────────────────────────────────────────────── -->
+<div class="status-bar">
+    <div class="status-item">
+        <label>Conn</label>
+        <span id="sbConn" class="no">None</span>
+    </div>
+    <div class="status-item">
+        <label>AES Key</label>
+        <span id="sbAes" class="no">Not Established</span>
+    </div>
+    <div class="status-item">
+        <label>User</label>
+        <span id="sbUser" class="no">Not Logged In</span>
+    </div>
+    <div class="status-item">
+        <label>Last Op</label>
+        <span id="sbLastOp" class="pending">—</span>
+    </div>
+    <div class="status-item">
+        <label>Last Status</label>
+        <span id="sbLastStatus">—</span>
+    </div>
+</div>
+
+<!-- ── DASHBOARD GRID ──────────────────────────────────────────────── -->
+<main class="dashboard">
+
+    <!-- LEFT: OPERATIONS PANEL -->
+    <section>
+        <div class="panel">
+            <div class="panel-title">
+                <span class="icon">&gt;_</span> Client Operations
+            </div>
+
+            <!-- Busy bar -->
+            <div id="busyBar" class="busy-bar"></div>
+
+            <!-- PHASE 1 -->
+            <div class="phase-header phase1">⬡ Phase 1 — Friendly User Mode</div>
+
+            <button id="btnKeyExchange" class="op-btn btn-p1" onclick="doKeyExchange()">
+                <span class="btn-num">[1]</span>
+                <span class="btn-label">Secure Key Exchange<br><small style="opacity:.55;font-weight:400;font-size:.75rem">RSA-1024 + AES-256 Handshake</small></span>
+                <span class="btn-arrow">›</span>
+            </button>
+
+            <button id="btnLogin" class="op-btn btn-login" onclick="openLoginModal()">
+                <span class="btn-num">[2]</span>
+                <span class="btn-label">User Login<br><small style="opacity:.55;font-weight:400;font-size:.75rem">SHA-256 Password Hash</small></span>
+                <span class="btn-arrow">›</span>
+            </button>
+
+            <button id="btnChat" class="op-btn btn-chat" onclick="openChatModal()">
+                <span class="btn-num">[3]</span>
+                <span class="btn-label">Send Encrypted Chat<br><small style="opacity:.55;font-weight:400;font-size:.75rem">AES-256-CBC + HMAC</small></span>
+                <span class="btn-arrow">›</span>
+            </button>
+
+            <button id="btnFinancials" class="op-btn btn-file" onclick="doAction('financials')">
+                <span class="btn-num">[4]</span>
+                <span class="btn-label">Download Classified Data<br><small style="opacity:.55;font-weight:400;font-size:.75rem">Confidential Financials</small></span>
+                <span class="btn-arrow">›</span>
+            </button>
+
+            <button id="btnTamper" class="op-btn btn-tamper" onclick="doAction('tamper')">
+                <span class="btn-num">[5]</span>
+                <span class="btn-label">Tamper Packet in Transit<br><small style="opacity:.55;font-weight:400;font-size:.75rem">MITM / HMAC Integrity Test</small></span>
+                <span class="btn-arrow">›</span>
+            </button>
+
+            <!-- PHASE 2 -->
+            <div class="phase-header phase2">⚠ Phase 2 — Cyberattack Mode</div>
+
+            <button id="btnBrute" class="op-btn btn-p2" onclick="doAction('brute_force')">
+                <span class="btn-num">[6]</span>
+                <span class="btn-label">Brute-Force Password Attack<br><small style="opacity:.55;font-weight:400;font-size:.75rem">Automated credential cracking</small></span>
+                <span class="btn-arrow">›</span>
+            </button>
+
+            <button id="btnReplay" class="op-btn btn-replay" onclick="doAction('replay')">
+                <span class="btn-num">[7]</span>
+                <span class="btn-label">Execute Replay Attack<br><small style="opacity:.55;font-weight:400;font-size:.75rem">Resend Captured Packet</small></span>
+                <span class="btn-arrow">›</span>
+            </button>
+
+            <button id="btnHoneypot" class="op-btn btn-honeypot" onclick="doAction('honeypot')">
+                <span class="btn-num">[8]</span>
+                <span class="btn-label">Probe Decoy Environment<br><small style="opacity:.55;font-weight:400;font-size:.75rem">Honeypot Trapping Check</small></span>
+                <span class="btn-arrow">›</span>
+            </button>
+
+            <!-- System -->
+            <div class="phase-header" style="color:var(--text-secondary);">── System</div>
+
+            <button id="btnDisconnect" class="op-btn btn-sys" onclick="doAction('disconnect')">
+                <span class="btn-num">[9]</span>
+                <span class="btn-label">Disconnect &amp; Reset Client</span>
+                <span class="btn-arrow">›</span>
+            </button>
+        </div>
+    </section>
+
+    <!-- RIGHT: TERMINAL + RESULT -->
+    <section class="right-col">
+
+        <!-- Live Terminal -->
+        <div class="panel terminal-panel">
+            <div class="panel-title">
+                <span class="icon">&gt;_</span> Live Client Log Output
+                <span style="flex:1"></span>
+                <button class="terminal-action-btn" onclick="clearTerminal()">Clear</button>
+                <button class="terminal-action-btn" id="autoScrollBtn" onclick="toggleAutoScroll()" style="margin-left:6px;">Auto-scroll ✓</button>
+            </div>
+
+            <div class="terminal-toolbar">
+                <div class="terminal-dots">
+                    <div class="dot dot-red"></div>
+                    <div class="dot dot-yellow"></div>
+                    <div class="dot dot-green"></div>
+                </div>
+                <div class="terminal-title-bar">adaptive-cryptoshield-client — operations@127.0.0.1:9999</div>
+            </div>
+
+            <div id="terminalOutput" class="terminal-output">
+                <div class="log-line">
+                    <span class="log-tag tag-SYSTEM">[SYSTEM]</span>
+                    <span class="log-msg msg-info">Client Dashboard initialized. Click an operation to begin.</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Result Viewer -->
+        <div class="panel result-panel">
+            <div class="panel-title">
+                <span class="icon">&gt;_</span> Operation Result / File Viewer
+            </div>
+            <div id="resultBadge" class="result-badge badge-hidden">● —</div>
+            <div id="resultContent" class="result-content">
+                <span class="result-placeholder">Operation results and decrypted file contents will appear here...</span>
+            </div>
+        </div>
+
+    </section>
+</main>
+
+<!-- ── LOGIN MODAL ─────────────────────────────────────────────────── -->
+<div id="loginModal" class="modal-overlay">
+    <div class="modal-box">
+        <div class="modal-title">🔐 User Login — SHA-256</div>
+        <div class="modal-field">
+            <label>Username</label>
+            <input id="loginUsername" type="text" placeholder="alice or bob" value="alice">
+            <div class="hint-text">Demo users: <code>alice</code> / <code>bob</code></div>
+        </div>
+        <div class="modal-field">
+            <label>Password</label>
+            <input id="loginPassword" type="password" placeholder="password" value="alice123">
+            <div class="hint-text">Default: <code>alice123</code> or <code>bobpassword</code></div>
+        </div>
+        <div class="modal-actions">
+            <button class="modal-btn cancel" onclick="closeModal('loginModal')">Cancel</button>
+            <button class="modal-btn primary" onclick="submitLogin()">🔑 Authenticate</button>
+        </div>
+    </div>
+</div>
+
+<!-- ── CHAT MODAL ──────────────────────────────────────────────────── -->
+<div id="chatModal" class="modal-overlay">
+    <div class="modal-box">
+        <div class="modal-title">💬 Send Encrypted Chat Message</div>
+        <div class="modal-field">
+            <label>Message</label>
+            <input id="chatMessage" type="text" placeholder="Type your secure message..." value="Hello from the CryptoShield Client!">
+            <div class="hint-text">Encrypted with <code>AES-256-CBC</code> + <code>HMAC-SHA256</code> before sending.</div>
+        </div>
+        <div class="modal-actions">
+            <button class="modal-btn cancel" onclick="closeModal('chatModal')">Cancel</button>
+            <button class="modal-btn primary" onclick="submitChat()">⚡ Encrypt &amp; Send</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    // ── State ─────────────────────────────────────────────────────────
+    let autoScroll = true;
+    let isBusy = false;
+
+    // ── SSE: stream client logs from server ───────────────────────────
+    const es = new EventSource('/client-events');
+
+    es.onmessage = function(e) {
+        try {
+            const msg = JSON.parse(e.data);
+
+            if (msg.type === 'log') {
+                appendLog(msg.tag, msg.message, msg.color_class || 'msg-info');
+            }
+
+            if (msg.type === 'status') {
+                updateStatusBar(msg);
+            }
+
+            if (msg.type === 'result') {
+                showResult(msg);
+            }
+
+            if (msg.type === 'busy') {
+                setBusy(msg.running);
+            }
+
+        } catch(err) { /* ignore parse errors on keepalives */ }
+    };
+
+    es.onerror = function() {
+        setConnPill('disconnected', 'SERVER OFFLINE');
+    };
+
+    // ── Terminal helpers ──────────────────────────────────────────────
+    function appendLog(tag, message, colorClass) {
+        const out = document.getElementById('terminalOutput');
+
+        const now = new Date();
+        const ts = now.toTimeString().slice(0, 8) + '.' + String(now.getMilliseconds()).padStart(3,'0');
+
+        const line = document.createElement('div');
+        line.className = 'log-line';
+        line.innerHTML = `
+            <span class="log-time">[${ts}]</span>
+            <span class="log-tag tag-${tag}">[${tag}]</span>
+            <span class="log-msg ${colorClass}">${escHtml(message)}</span>
+        `;
+        out.appendChild(line);
+
+        // Keep max 300 lines
+        while (out.children.length > 300) out.removeChild(out.firstChild);
+
+        if (autoScroll) out.scrollTop = out.scrollHeight;
+    }
+
+    function clearTerminal() {
+        document.getElementById('terminalOutput').innerHTML = '';
+        appendLog('SYSTEM', 'Terminal cleared.', 'msg-info');
+    }
+
+    function toggleAutoScroll() {
+        autoScroll = !autoScroll;
+        document.getElementById('autoScrollBtn').textContent = autoScroll ? 'Auto-scroll ✓' : 'Auto-scroll ✗';
+    }
+
+    function escHtml(s) {
+        return String(s)
+            .replace(/&/g,'&amp;')
+            .replace(/</g,'&lt;')
+            .replace(/>/g,'&gt;')
+            .replace(/"/g,'&quot;');
+    }
+
+    // ── Status Bar ───────────────────────────────────────────────────
+    function updateStatusBar(msg) {
+        if (msg.connected !== undefined) {
+            const el = document.getElementById('sbConn');
+            el.textContent = msg.connected ? '127.0.0.1:9999' : 'None';
+            el.className = msg.connected ? 'ok' : 'no';
+            setConnPill(msg.connected ? 'connected' : 'disconnected',
+                        msg.connected ? 'CONNECTED' : 'DISCONNECTED');
+        }
+        if (msg.aes_key !== undefined) {
+            const el = document.getElementById('sbAes');
+            el.textContent = msg.aes_key ? msg.aes_key : 'Not Established';
+            el.className = msg.aes_key ? 'ok' : 'no';
+        }
+        if (msg.username !== undefined) {
+            const el = document.getElementById('sbUser');
+            el.textContent = msg.username || 'Not Logged In';
+            el.className = msg.username ? 'ok' : 'no';
+        }
+        if (msg.last_op !== undefined) {
+            document.getElementById('sbLastOp').textContent = msg.last_op;
+        }
+        if (msg.last_status !== undefined) {
+            const el = document.getElementById('sbLastStatus');
+            el.textContent = msg.last_status;
+            el.className = msg.last_status === 'success' ? 'ok' :
+                           msg.last_status === 'failed'  ? 'no' : 'pending';
+        }
+    }
+
+    function setConnPill(state, label) {
+        const pill = document.getElementById('connPill');
+        pill.className = 'status-pill ' + state;
+        document.getElementById('connLabel').textContent = label;
+    }
+
+    // ── Result Viewer ────────────────────────────────────────────────
+    function showResult(msg) {
+        const badge = document.getElementById('resultBadge');
+        const content = document.getElementById('resultContent');
+
+        badge.className = 'result-badge ' +
+            (msg.status === 'success' ? 'badge-success' :
+             msg.status === 'error'   ? 'badge-error'   : 'badge-warn');
+        badge.textContent = '● ' + (msg.label || msg.status.toUpperCase());
+
+        content.textContent = msg.content || '—';
+        content.style.color = msg.status === 'success' ? 'var(--neon-green)' :
+                              msg.status === 'error'   ? 'var(--neon-red)'   :
+                              'var(--neon-yellow)';
+    }
+
+    // ── Busy indicator ───────────────────────────────────────────────
+    function setBusy(running) {
+        isBusy = running;
+        document.getElementById('busyBar').className = running ? 'busy-bar running' : 'busy-bar';
+        // Disable all buttons while busy
+        document.querySelectorAll('.op-btn').forEach(b => b.disabled = running);
+    }
+
+    // ── POST helper ───────────────────────────────────────────────────
+    async function postAction(body) {
+        if (isBusy) return;
+        try {
+            const r = await fetch('/client-action', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body)
+            });
+            const data = await r.json();
+            if (data.error) appendLog('ERROR', data.error, 'msg-alarm');
+        } catch(err) {
+            appendLog('ERROR', 'Failed to reach server: ' + err, 'msg-alarm');
+        }
+    }
+
+    // ── Operation handlers ────────────────────────────────────────────
+    function doKeyExchange() {
+        appendLog('SYSTEM', '▶ Initiating Secure Key Exchange (RSA + AES)...', 'msg-info');
+        postAction({ action: 'key_exchange' });
+    }
+
+    function doAction(action) {
+        const labels = {
+            financials:  '▶ Requesting Classified Financials...',
+            tamper:      '▶ Executing MITM / HMAC Tamper Demo...',
+            brute_force: '▶ Launching Brute-Force Password Attack...',
+            replay:      '▶ Executing Replay Attack...',
+            honeypot:    '▶ Probing Honeypot / Decoy Environment...',
+            disconnect:  '▶ Disconnecting and Resetting Client Session...'
+        };
+        appendLog('SYSTEM', labels[action] || '▶ Running: ' + action, 'msg-info');
+        postAction({ action });
+    }
+
+    // ── Modals ────────────────────────────────────────────────────────
+    function openLoginModal() {
+        document.getElementById('loginModal').classList.add('open');
+        document.getElementById('loginUsername').focus();
+    }
+
+    function openChatModal() {
+        document.getElementById('chatModal').classList.add('open');
+        document.getElementById('chatMessage').focus();
+    }
+
+    function closeModal(id) {
+        document.getElementById(id).classList.remove('open');
+    }
+
+    function submitLogin() {
+        const username = document.getElementById('loginUsername').value.trim();
+        const password = document.getElementById('loginPassword').value.trim();
+        if (!username || !password) {
+            appendLog('ERROR', 'Username and password required.', 'msg-alarm');
+            return;
+        }
+        closeModal('loginModal');
+        appendLog('SYSTEM', `▶ Logging in as '${username}'...`, 'msg-info');
+        postAction({ action: 'login', username, password });
+    }
+
+    function submitChat() {
+        const message = document.getElementById('chatMessage').value.trim();
+        if (!message) {
+            appendLog('ERROR', 'Message cannot be empty.', 'msg-alarm');
+            return;
+        }
+        closeModal('chatModal');
+        appendLog('SYSTEM', `▶ Sending encrypted message: "${message}"`, 'msg-info');
+        postAction({ action: 'chat', message });
+    }
+
+    // ── Keyboard shortcuts ────────────────────────────────────────────
+    document.addEventListener('keydown', e => {
+        if (e.key === 'Escape') {
+            closeModal('loginModal');
+            closeModal('chatModal');
+        }
+        if (e.target.tagName === 'INPUT') return;
+        const map = { '1': doKeyExchange, '4': ()=>doAction('financials'),
+                      '5': ()=>doAction('tamper'), '6': ()=>doAction('brute_force'),
+                      '7': ()=>doAction('replay'),  '8': ()=>doAction('honeypot'),
+                      '9': ()=>doAction('disconnect') };
+        if (map[e.key]) map[e.key]();
+        if (e.key === '2') openLoginModal();
+        if (e.key === '3') openChatModal();
+    });
+
+    // ── Enter key in modals ───────────────────────────────────────────
+    document.getElementById('loginPassword').addEventListener('keydown', e => {
+        if (e.key === 'Enter') submitLogin();
+    });
+    document.getElementById('chatMessage').addEventListener('keydown', e => {
+        if (e.key === 'Enter') submitChat();
+    });
+</script>
+</body>
+</html>

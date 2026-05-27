@@ -20,12 +20,15 @@ from crypto_scratch import (
     generate_rsa_keys, rsa_decrypt
 )
 
+# Import client for in-process management (dashboard control)
+from client import AdaptiveSecureClient
+
 # User Database (Pre-hashed passwords using custom SHA-256)
-# Password for "alice" is "alice123" -> SHA-256: 760cfc4b726487e9cfef1b569fe01c3fcd0bb2ffdf39dbb7c02bb03cb47863f8
-# Password for "bob" is "bobpassword" -> SHA-256: 512b9d883b190f845a574ec8c3f684cf0efdcf1e7df74b5c737c35e95df188cf
+# Password for "alice" is "alice123" -> SHA-256: 4e40e8ffe0ee32fa53e139147ed559229a5930f89c2204706fc174beb36210b3
+# Password for "bob" is "bobpassword" -> SHA-256: bc786c379d8b4334faa1f5ed4428d53ed5fbf6247a5974a72eac7fd5c13410d8
 USERS = {
-    "alice": "760cfc4b726487e9cfef1b569fe01c3fcd0bb2ffdf39dbb7c02bb03cb47863f8",
-    "bob": "512b9d883b190f845a574ec8c3f684cf0efdcf1e7df74b5c737c35e95df188cf"
+    "alice": "4e40e8ffe0ee32fa53e139147ed559229a5930f89c2204706fc174beb36210b3",
+    "bob": "bc786c379d8b4334faa1f5ed4428d53ed5fbf6247a5974a72eac7fd5c13410d8"
 }
 
 class AdaptiveSecureServer:
@@ -47,11 +50,17 @@ class AdaptiveSecureServer:
         # Active sessions: IP -> { "aes_key": bytes, "username": str, "rekey_count": int }
         self.sessions = {}
         
-        # SSE Broadcasting
+        # SSE Broadcasting (server dashboard)
         self.sse_listeners = []
         self.lock = threading.Lock()
         self.logs = []
-        
+
+        # ── Client Dashboard: SSE listeners + managed client state ────
+        self.client_sse_listeners = []
+        self.managed_client = None          # live AdaptiveSecureClient
+        self.client_lock = threading.Lock()
+        self.client_busy = False
+
         # Add initial logs
         self.log_event("SYSTEM", "Secure Server Engine initialized.", "info")
         self.log_event("CRYPTO", f"RSA-1024 Key Modulus N generated: {hex(self.rsa_pub[1])[:30]}...", "secure")
@@ -102,7 +111,245 @@ class AdaptiveSecureServer:
         with self.lock:
             if q in self.sse_listeners:
                 self.sse_listeners.remove(q)
-                
+
+    # ── Client Dashboard SSE helpers ──────────────────────────────────
+    def register_client_sse(self, q):
+        with self.client_lock:
+            self.client_sse_listeners.append(q)
+
+    def unregister_client_sse(self, q):
+        with self.client_lock:
+            if q in self.client_sse_listeners:
+                self.client_sse_listeners.remove(q)
+
+    def broadcast_client_msg(self, payload_dict):
+        """Push a JSON message to all client-dashboard SSE listeners."""
+        data = json.dumps(payload_dict)
+        with self.client_lock:
+            alive = []
+            for q in self.client_sse_listeners:
+                try:
+                    q.put_nowait(data)
+                    alive.append(q)
+                except Exception:
+                    pass
+            self.client_sse_listeners = alive
+
+    def client_log(self, tag, message, color_class='msg-info'):
+        """Send a log line to the client dashboard SSE stream."""
+        self.broadcast_client_msg({
+            'type': 'log',
+            'tag': tag,
+            'message': message,
+            'color_class': color_class
+        })
+
+    def client_status(self, **kwargs):
+        """Push a status update to the client dashboard."""
+        kwargs['type'] = 'status'
+        self.broadcast_client_msg(kwargs)
+
+    def client_result(self, status, label, content):
+        """Push an operation result to the client dashboard result panel."""
+        self.broadcast_client_msg({
+            'type': 'result',
+            'status': status,
+            'label': label,
+            'content': content
+        })
+
+    def _patch_client_logger(self, client):
+        """Monkey-patch client.log() so output also streams to the dashboard."""
+        server = self
+        COLOR_MAP = {
+            '\033[96m':  ('INFO',    'msg-info'),
+            '\033[92m':  ('SECURE',  'msg-secure'),
+            '\033[93m':  ('DEFENSE', 'msg-warning'),
+            '\033[91m':  ('ATTACK',  'msg-alarm'),
+            '\033[95m':  ('HONEYPOT','msg-honeypot'),
+            '\033[1m':   ('INFO',    'msg-info'),
+        }
+        def patched_log(tag, message, color='\033[96m'):
+            # Original stdout print (keep CLI working)
+            timestamp = datetime.now().strftime("%H:%M:%S.%f")[:-3]
+            print(f"{color}[{timestamp}] [{tag}] {message}\033[0m")
+            # Map color to CSS class
+            _, css = COLOR_MAP.get(color, ('INFO', 'msg-info'))
+            server.client_log(tag, message, css)
+        client.log = patched_log
+
+    def get_or_create_client(self):
+        """Return the managed client, creating+connecting if needed."""
+        if self.managed_client and self.managed_client.sock:
+            return self.managed_client
+        c = AdaptiveSecureClient(host='127.0.0.1', port=9999)
+        self._patch_client_logger(c)
+        if c.connect():
+            self.managed_client = c
+            self.client_status(
+                connected=True,
+                aes_key=None,
+                username=None,
+                last_op='connect',
+                last_status='success'
+            )
+            return c
+        else:
+            self.client_log('ERROR', 'Could not connect to TCP server on port 9999.', 'msg-alarm')
+            return None
+
+    def run_client_action(self, body):
+        """Execute a client operation in a background thread and stream output via SSE."""
+        action = body.get('action', '')
+        self.client_busy = True
+        self.broadcast_client_msg({'type': 'busy', 'running': True})
+
+        try:
+            c = self.get_or_create_client()
+            if c is None:
+                self.client_log('ERROR', 'No active connection. Cannot execute action.', 'msg-alarm')
+                return
+
+            if action == 'key_exchange':
+                ok = c.do_key_exchange()
+                self.client_status(
+                    aes_key=(c.aes_key.hex()[:16] + '...' if c.aes_key else None),
+                    last_op='Key Exchange',
+                    last_status='success' if ok else 'failed'
+                )
+                self.client_result(
+                    'success' if ok else 'error',
+                    'Key Exchange ' + ('✓ Complete' if ok else '✗ Failed'),
+                    ('AES-256 Session Key established.\nKey (first 16 bytes): ' + c.aes_key.hex()[:32] + '...') if ok
+                    else 'Key exchange failed. Check server connection.'
+                )
+
+            elif action == 'login':
+                username = body.get('username', '')
+                password = body.get('password', '')
+                if not c.aes_key:
+                    self.client_log('ERROR', 'Key exchange required before login!', 'msg-alarm')
+                    self.client_result('error', 'Prerequisites Missing', 'Run [1] Key Exchange first.')
+                    return
+                c.do_login(username, password)
+                self.client_status(
+                    username=(c.username if c.authenticated else None),
+                    last_op=f'Login ({username})',
+                    last_status='success' if c.authenticated else 'failed'
+                )
+                self.client_result(
+                    'success' if c.authenticated else 'error',
+                    f'Login: {"Authenticated" if c.authenticated else "Rejected"}',
+                    f'User: {username}\nStatus: {"Access granted" if c.authenticated else "Invalid credentials"}'
+                )
+
+            elif action == 'chat':
+                message = body.get('message', 'Hello!')
+                if not c.aes_key:
+                    self.client_log('ERROR', 'Key exchange required before sending chat!', 'msg-alarm')
+                    self.client_result('error', 'Prerequisites Missing', 'Run [1] Key Exchange first.')
+                    return
+                c.do_send_message(message)
+                self.client_status(last_op='Send Chat', last_status='success')
+                self.client_result(
+                    'success', 'Chat Sent ✓',
+                    f'Message: "{message}"\nEncrypted with AES-256-CBC + HMAC-SHA256'
+                )
+
+            elif action == 'financials':
+                if not c.aes_key:
+                    self.client_log('ERROR', 'Key exchange required first!', 'msg-alarm')
+                    self.client_result('error', 'Prerequisites Missing', 'Run [1] Key Exchange first.')
+                    return
+                # Capture financials output
+                import io, sys as _sys
+                old_stdout = _sys.stdout
+                _sys.stdout = buf = io.StringIO()
+                try:
+                    c.do_get_classified_financials()
+                finally:
+                    _sys.stdout = old_stdout
+                captured = buf.getvalue()
+                # Strip ANSI codes for display
+                import re
+                clean = re.sub(r'\033\[[0-9;]*m', '', captured)
+                self.client_status(last_op='Download Financials', last_status='success')
+                self.client_result(
+                    'success', 'Classified Data Received ✓',
+                    clean.strip() if clean.strip() else 'Data received — check terminal for full output.'
+                )
+
+            elif action == 'tamper':
+                if not c.aes_key:
+                    self.client_log('ERROR', 'Key exchange required first!', 'msg-alarm')
+                    self.client_result('error', 'Prerequisites Missing', 'Run [1] Key Exchange first.')
+                    return
+                c.do_tamper_demo()
+                self.client_status(last_op='Tamper Demo', last_status='success')
+                self.client_result(
+                    'warn', 'Tamper Packet Sent ⚠',
+                    'Packet intentionally corrupted (HMAC modified).\nServer should reject with integrity error.'
+                )
+
+            elif action == 'brute_force':
+                if not c.aes_key:
+                    self.client_log('ERROR', 'Key exchange required first!', 'msg-alarm')
+                    self.client_result('error', 'Prerequisites Missing', 'Run [1] Key Exchange first.')
+                    return
+                c.run_brute_force()
+                self.client_status(last_op='Brute-Force Attack', last_status='success')
+                self.client_result(
+                    'warn', 'Brute-Force Sequence Complete',
+                    'Attempted: admin123, password, 123456, superman, cyberdefense\nServer should have blocked the IP after 3 attempts.'
+                )
+
+            elif action == 'replay':
+                if not c.last_valid_packet:
+                    self.client_log('ERROR', 'No saved packet to replay! Send a chat message first (Option 3).', 'msg-alarm')
+                    self.client_result('error', 'No Packet Cached', 'Send a chat message first to capture a valid packet.')
+                    return
+                c.run_replay_attack()
+                self.client_status(last_op='Replay Attack', last_status='success')
+                self.client_result(
+                    'warn', 'Replay Attack Fired ⚠',
+                    f'Replayed nonce: {c.last_valid_packet.get("nonce", "n/a")}\nServer should have rejected with replay protection.'
+                )
+
+            elif action == 'honeypot':
+                if not c.aes_key:
+                    self.client_log('ERROR', 'Key exchange required first!', 'msg-alarm')
+                    self.client_result('error', 'Prerequisites Missing', 'Run [1] Key Exchange first.')
+                    return
+                c.check_honeypot_trap()
+                self.client_status(last_op='Honeypot Probe', last_status='success')
+                self.client_result(
+                    'warn', 'Honeypot Probe Complete 🕵️',
+                    'Sent probe login with bad credentials.\nIf threat level is CRITICAL, server feeds decoy data.'
+                )
+
+            elif action == 'disconnect':
+                if self.managed_client:
+                    self.managed_client.close()
+                    self.managed_client = None
+                self.client_status(
+                    connected=False, aes_key=None,
+                    username=None, last_op='Disconnect', last_status='success'
+                )
+                self.client_result('warn', 'Disconnected', 'Session closed. Run [1] Key Exchange to start a new session.')
+
+            else:
+                self.client_log('ERROR', f'Unknown action: {action}', 'msg-alarm')
+
+        except Exception as ex:
+            import traceback
+            tb = traceback.format_exc()
+            self.client_log('ERROR', f'Action error: {ex}', 'msg-alarm')
+            self.client_result('error', 'Unhandled Error', str(ex))
+            print(tb)
+        finally:
+            self.client_busy = False
+            self.broadcast_client_msg({'type': 'busy', 'running': False})
+
     def check_ip_blocked(self, ip):
         """Checks if an IP is currently blocked, handles expiry."""
         if ip in self.blocked_ips:
@@ -562,7 +809,7 @@ def make_http_handler_class(server_instance):
                     server_instance.unregister_sse_listener(q)
                 return
                 
-            # Serves Dashboard HTML
+            # Serves Server Dashboard HTML
             if parsed_path.path in ["/", "/index.html", "/dashboard"]:
                 try:
                     with open("dashboard.html", "r", encoding="utf-8") as f:
@@ -574,10 +821,111 @@ def make_http_handler_class(server_instance):
                 except FileNotFoundError:
                     self.send_response(404)
                     self.end_headers()
-                    self.wfile.write(b"dashboard.html not found. Please verify placement in workspace.")
+                    self.wfile.write(b"dashboard.html not found.")
                 return
-                
+
+            # Serves Client Dashboard HTML
+            if parsed_path.path in ["/client", "/client.html", "/client-dashboard"]:
+                try:
+                    with open("client_dashboard.html", "r", encoding="utf-8") as f:
+                        content = f.read()
+                    self.send_response(200)
+                    self.send_header('Content-Type', 'text/html; charset=utf-8')
+                    self.end_headers()
+                    self.wfile.write(content.encode('utf-8'))
+                except FileNotFoundError:
+                    self.send_response(404)
+                    self.end_headers()
+                    self.wfile.write(b"client_dashboard.html not found.")
+                return
+
+            # Client SSE Event Stream
+            if parsed_path.path == "/client-events":
+                self.send_response(200)
+                self.send_header('Content-Type', 'text/event-stream')
+                self.send_header('Cache-Control', 'no-cache')
+                self.send_header('Connection', 'keep-alive')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.end_headers()
+
+                q = queue.Queue()
+                server_instance.register_client_sse(q)
+
+                # Send current client state immediately on connect
+                c = server_instance.managed_client
+                init_status = json.dumps({
+                    'type': 'status',
+                    'connected': bool(c and c.sock),
+                    'aes_key': (c.aes_key.hex()[:16] + '...' if c and c.aes_key else None),
+                    'username': (c.username if c and c.authenticated else None),
+                    'last_op': '—',
+                    'last_status': '—'
+                })
+                try:
+                    self.wfile.write(f"data: {init_status}\n\n".encode('utf-8'))
+                    self.wfile.flush()
+                except Exception:
+                    server_instance.unregister_client_sse(q)
+                    return
+
+                try:
+                    while True:
+                        try:
+                            event_data = q.get(timeout=5.0)
+                            self.wfile.write(f"data: {event_data}\n\n".encode('utf-8'))
+                            self.wfile.flush()
+                        except queue.Empty:
+                            self.wfile.write(b": ping\n\n")
+                            self.wfile.flush()
+                except (ConnectionError, BrokenPipeError, socket.error):
+                    pass
+                finally:
+                    server_instance.unregister_client_sse(q)
+                return
+
             # Default 404
+            self.send_response(404)
+            self.end_headers()
+            self.wfile.write(b"Not Found")
+
+        def do_POST(self):
+            parsed_path = urllib.parse.urlparse(self.path)
+
+            # Client Action Endpoint
+            if parsed_path.path == "/client-action":
+                # CORS preflight handled implicitly; read body
+                content_length = int(self.headers.get('Content-Length', 0))
+                body_bytes = self.rfile.read(content_length) if content_length else b'{}'
+                try:
+                    body = json.loads(body_bytes.decode('utf-8'))
+                except Exception:
+                    body = {}
+
+                if server_instance.client_busy:
+                    resp = json.dumps({'error': 'Client is busy. Please wait.'}).encode('utf-8')
+                    self.send_response(429)
+                    self.send_header('Content-Type', 'application/json')
+                    self.send_header('Content-Length', str(len(resp)))
+                    self.end_headers()
+                    self.wfile.write(resp)
+                    return
+
+                # Run action in background thread to avoid blocking HTTP
+                t = threading.Thread(
+                    target=server_instance.run_client_action,
+                    args=(body,),
+                    daemon=True
+                )
+                t.start()
+
+                resp = json.dumps({'status': 'accepted', 'action': body.get('action')}).encode('utf-8')
+                self.send_response(202)
+                self.send_header('Content-Type', 'application/json')
+                self.send_header('Content-Length', str(len(resp)))
+                self.end_headers()
+                self.wfile.write(resp)
+                return
+
             self.send_response(404)
             self.end_headers()
             self.wfile.write(b"Not Found")

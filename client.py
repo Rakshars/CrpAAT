@@ -193,8 +193,8 @@ class AdaptiveSecureClient:
                     # Let's send a silent auth request. Note: in this menu model we will let the next user command execute,
                     # but we can re-send the login. Let's do a quick login.
                     pass_hashes = {
-                        "alice": "760cfc4b726487e9cfef1b569fe01c3fcd0bb2ffdf39dbb7c02bb03cb47863f8",
-                        "bob": "512b9d883b190f845a574ec8c3f684cf0efdcf1e7df74b5c737c35e95df188cf"
+                        "alice": "4e40e8ffe0ee32fa53e139147ed559229a5930f89c2204706fc174beb36210b3",
+                        "bob": "bc786c379d8b4334faa1f5ed4428d53ed5fbf6247a5974a72eac7fd5c13410d8"
                     }
                     if self.username in pass_hashes:
                         self.encrypt_and_send({
