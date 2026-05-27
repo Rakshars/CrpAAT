@@ -5,6 +5,11 @@ Interactive Client & Cyberattack Emulator for Laptop 2 (Client/Attacker).
 """
 
 import sys
+if sys.platform.startswith('win'):
+    try:
+        sys.stdout.reconfigure(encoding='utf-8')
+    except AttributeError:
+        pass
 import json
 import socket
 import random

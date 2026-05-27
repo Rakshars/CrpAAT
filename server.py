@@ -5,6 +5,11 @@ Secure Server Engine with Adaptive Cryptanalysis Defense & HTTP Live Dashboard.
 """
 
 import sys
+if sys.platform.startswith('win'):
+    try:
+        sys.stdout.reconfigure(encoding='utf-8')
+    except AttributeError:
+        pass
 import json
 import socket
 import threading
@@ -332,11 +337,19 @@ class AdaptiveSecureServer:
                 if self.managed_client:
                     self.managed_client.close()
                     self.managed_client = None
+                
+                # Reset threat level to SAFE (0) and clear all active blocked IPs!
+                self.blocked_ips.clear()
+                self.failed_logins.clear()
+                self.threat_level = 0
+                self.log_event("SYSTEM", "Client session reset requested. Clearing active IP blocks and resetting threat level to SAFE (0).", "info")
+                self.broadcast_sse("threat_change", {"threat_level": 0})
+                
                 self.client_status(
                     connected=False, aes_key=None,
                     username=None, last_op='Disconnect', last_status='success'
                 )
-                self.client_result('warn', 'Disconnected', 'Session closed. Run [1] Key Exchange to start a new session.')
+                self.client_result('warn', 'Disconnected & Reset', 'Session closed. Threat level reset to SAFE (0) and active IP blocks cleared!')
 
             else:
                 self.client_log('ERROR', f'Unknown action: {action}', 'msg-alarm')
