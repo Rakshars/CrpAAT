@@ -916,10 +916,35 @@
              msg.status === 'error'   ? 'badge-error'   : 'badge-warn');
         badge.textContent = '● ' + (msg.label || msg.status.toUpperCase());
 
-        content.textContent = msg.content || '—';
-        content.style.color = msg.status === 'success' ? 'var(--neon-green)' :
-                              msg.status === 'error'   ? 'var(--neon-red)'   :
-                              'var(--neon-yellow)';
+        const text = msg.content || '';
+        if (text.startsWith('__PDF_PAYLOAD__:')) {
+            const parts = text.split(':');
+            const filename = parts[1];
+            const base64Data = parts[2];
+            
+            content.style.maxHeight = '480px';
+            content.style.color = '#fff';
+            content.innerHTML = `
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; padding-bottom:10px; border-bottom:1px solid rgba(255,255,255,0.08);">
+                    <div style="font-family:'Outfit', sans-serif; text-align:left;">
+                        <span style="font-weight:800; color:#fff; font-size:0.9rem;">📄 File: ${filename}</span>
+                        <br><small style="color:var(--text-secondary); font-size:0.75rem;">Size: ~${~?(base64Data.length * 0.75 / 1024) : 10} KB | Type: Adobe PDF Document</small>
+                    </div>
+                    <a href="data:application/pdf;base64,${base64Data}" download="${filename}" class="terminal-action-btn" style="text-decoration:none; display:inline-flex; align-items:center; gap:6px; background:rgba(0,240,255,0.12); border-color:var(--neon-cyan); color:var(--neon-cyan); padding:6px 14px; font-weight:700; border-radius:6px; transition:all 0.25s;">
+                        📥 Download PDF
+                    </a>
+                </div>
+                <div style="position:relative; width:100%; height:365px; background:#0c0817; border-radius:8px; overflow:hidden; border:1px solid rgba(0,240,255,0.15); box-shadow:0 0 15px rgba(0,240,255,0.05);">
+                    <iframe src="data:application/pdf;base64,${base64Data}#toolbar=0&navpanes=0" width="100%" height="100%" style="border:none;"></iframe>
+                </div>
+            `;
+        } else {
+            content.style.maxHeight = '220px';
+            content.textContent = text || '—';
+            content.style.color = msg.status === 'success' ? 'var(--neon-green)' :
+                                  msg.status === 'error'   ? 'var(--neon-red)'   :
+                                  'var(--neon-yellow)';
+        }
     }
 
     // ── Busy indicator ───────────────────────────────────────────────

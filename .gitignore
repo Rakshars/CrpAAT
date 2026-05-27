@@ -33,3 +33,4 @@ Thumbs.db
 # === Local Telemetry & Decoys ===
 decoy_passwords.db
 *.log
+*.pdf

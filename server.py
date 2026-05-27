@@ -261,23 +261,24 @@ class AdaptiveSecureServer:
                     self.client_log('ERROR', 'Key exchange required first!', 'msg-alarm')
                     self.client_result('error', 'Prerequisites Missing', 'Run [1] Key Exchange first.')
                     return
-                # Capture financials output
-                import io, sys as _sys
-                old_stdout = _sys.stdout
-                _sys.stdout = buf = io.StringIO()
-                try:
-                    c.do_get_classified_financials()
-                finally:
-                    _sys.stdout = old_stdout
-                captured = buf.getvalue()
-                # Strip ANSI codes for display
-                import re
-                clean = re.sub(r'\033\[[0-9;]*m', '', captured)
-                self.client_status(last_op='Download Financials', last_status='success')
-                self.client_result(
-                    'success', 'Classified Data Received ✓',
-                    clean.strip() if clean.strip() else 'Data received — check terminal for full output.'
-                )
+                resp = c.do_get_classified_financials()
+                if resp and resp.get("status") == "success":
+                    pdf_data = resp.get("pdf_data", "")
+                    filename = resp.get("filename", "classified_financials.pdf")
+                    honey_flag = resp.get("honey_flag")
+                    
+                    self.client_status(last_op='Download Financials', last_status='success')
+                    self.client_result(
+                        'warn' if honey_flag else 'success',
+                        f'Classified File Received: {filename} ✓',
+                        f"__PDF_PAYLOAD__:{filename}:{pdf_data}"
+                    )
+                else:
+                    self.client_status(last_op='Download Financials', last_status='failed')
+                    self.client_result(
+                        'error', 'Access Denied ✗',
+                        resp.get("msg") if resp else 'No response from server.'
+                    )
 
             elif action == 'tamper':
                 if not c.aes_key:
@@ -399,7 +400,26 @@ class AdaptiveSecureServer:
                     self.log_event("ATTACK", f"Blocked IP {ip} attempted transmission. Escalating threat.", "alarm")
                     
                     if self.threat_level == 3:
-                        # Feed honeypot fake response
+                        # Try to decrypt and serve action-specific honeypot reply
+                        try:
+                            req = json.loads(data.decode('utf-8').strip())
+                            if req.get("type") == "secure_packet" and session_aes_key:
+                                iv = bytes.fromhex(req.get("iv"))
+                                ciphertext = bytes.fromhex(req.get("ciphertext"))
+                                decrypted_bytes = aes_256_cbc_decrypt(ciphertext, session_aes_key, iv)
+                                decrypted_payload = json.loads(decrypted_bytes.decode('utf-8'))
+                                action = decrypted_payload.get("action")
+                                
+                                # Feed encrypted custom decoy response
+                                fake_reply = self.get_honeypot_fake_reply(action, decrypted_payload)
+                                fake_reply_enc = self.encrypt_payload(fake_reply, session_aes_key)
+                                conn.write(json.dumps(fake_reply_enc).encode('utf-8') + b'\n')
+                                conn.flush()
+                                continue
+                        except Exception:
+                            pass
+                            
+                        # Fallback to generic unencrypted decoy response
                         fake_reply = self.get_honeypot_fake_reply("ATTACK_HAMMER")
                         conn.write(json.dumps(fake_reply).encode('utf-8') + b'\n')
                         conn.flush()
@@ -671,9 +691,32 @@ class AdaptiveSecureServer:
                     elif action == "get_classified_financials":
                         if username:
                             self.log_event("SECURE", f"User '{username}' accessed classified financials.", "secure")
+                            
+                            pdf_lines = [
+                                b"CRYPTOSHIELD SECURE DATA TRANSMISSION",
+                                b"=====================================",
+                                b"CLASSIFIED FINANCIAL RECORDS - CONFIDENTIAL",
+                                b"Authorized Access granted to: " + username.encode('utf-8'),
+                                b"",
+                                b"Date        Revenue     Expense    Net Profit",
+                                b"---------------------------------------------",
+                                b"2026-Q1    $155,000    $112,000      $43,000",
+                                b"2026-Q2    $189,000    $130,000      $59,000",
+                                b"2026-Q3    $204,000    $145,000      $59,000",
+                                b"---------------------------------------------",
+                                b"Total      $548,000    $387,000     $161,000",
+                                b"",
+                                b"Verification Signature (HMAC-SHA256): Verified",
+                                b"Security Protocol: AES-256-CBC Encrypted",
+                            ]
+                            pdf_bytes = self.generate_pdf_from_scratch(pdf_lines)
+                            import base64
+                            pdf_base64 = base64.b64encode(pdf_bytes).decode('ascii')
+                            
                             reply = {
                                 "status": "success",
-                                "filename": "classified_financials.csv",
+                                "filename": "classified_financials.pdf",
+                                "pdf_data": pdf_base64,
                                 "content": "Date,Revenue,Expense\n2026-Q1,$155,000,$112,000\n2026-Q2,$189,000,$130,000\n2026-Q3,$204,000,$145,000\nTotal,$548,000,$387,000\nNetProfit,$161,000"
                             }
                         else:
@@ -698,6 +741,55 @@ class AdaptiveSecureServer:
             if ip in self.sessions:
                 del self.sessions[ip]
             self.log_event("NETWORK", f"TCP socket closed for {ip}.", "info")
+
+    def generate_pdf_from_scratch(self, text_lines):
+        """
+        Generates a structurally valid PDF byte stream from scratch
+        with standard Courier font and mathematically accurate cross-reference tables.
+        """
+        objects = []
+        # 1. Catalog
+        objects.append(b"<< /Type /Catalog /Pages 2 0 R >>")
+        # 2. Pages list
+        objects.append(b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>")
+        
+        # Build text stream
+        stream_content = b"BT\n/F1 12 Tf\n16 TL\n50 720 Td\n"
+        for line in text_lines:
+            escaped = line.replace(b"(", b"\\(").replace(b")", b"\\)")
+            stream_content += b"(" + escaped + b") Tj T*\n"
+        stream_content += b"ET"
+        
+        # 3. Page definition
+        objects.append(b"<< /Type /Page /Parent 2 0 R /Resources << /Font << /F1 4 0 R >> >> /MediaBox [0 0 612 792] /Contents 5 0 R >>")
+        # 4. Font definition
+        objects.append(b"<< /Type /Font /Subtype /Type1 /BaseFont /Courier >>")
+        # 5. Stream content definition
+        objects.append(b"<< /Length " + str(len(stream_content)).encode('ascii') + b" >>\nstream\n" + stream_content + b"\nendstream")
+        
+        pdf = bytearray(b"%PDF-1.4\n")
+        offsets = []
+        
+        for idx, obj in enumerate(objects, start=1):
+            offsets.append(len(pdf))
+            pdf.extend(f"{idx} 0 obj\n".encode('ascii'))
+            pdf.extend(obj)
+            pdf.extend(b"\nendobj\n")
+            
+        xref_pos = len(pdf)
+        pdf.extend(b"xref\n")
+        pdf.extend(f"0 {len(objects) + 1}\n".encode('ascii'))
+        pdf.extend(b"0000000000 65535 f \n")
+        for offset in offsets:
+            pdf.extend(f"{offset:010d} 00000 n \n".encode('ascii'))
+            
+        pdf.extend(b"trailer\n")
+        pdf.extend(f"<< /Size {len(objects) + 1} /Root 1 0 R >>\n".encode('ascii'))
+        pdf.extend(b"startxref\n")
+        pdf.extend(f"{xref_pos}\n".encode('ascii'))
+        pdf.extend(b"%%EOF\n")
+        
+        return bytes(pdf)
 
     def encrypt_payload(self, data_dict, aes_key):
         """Helper to package and encrypt a payload into standard secure_packet JSON."""
@@ -734,10 +826,29 @@ class AdaptiveSecureServer:
                 "classified_databases": ["customer_passwords", "financial_records"]
             }
         elif action == "get_classified_financials" or "classified" in str(decrypted_payload):
+            decoy_lines = [
+                b"WARNING: DECOY FEEDER ACTIVE - ACTIVE HONEYPOT ALERT",
+                b"====================================================",
+                b"UNAUTHORIZED INTRUSION DETECTED",
+                b"SYSTEM LEVEL ALERT: HIGH/CRITICAL SEVERITY TRAP",
+                b"",
+                b"CLASSIFIED ROOT FINANCIAL TELEMETRY (DECOY):",
+                b"---------------------------------------------",
+                b"Node ID: CORE-SERVER-NODE-1",
+                b"Session Token: DECOY_ROOT_AUTH_TOKEN_99812739182379A",
+                b"Honeypot Flag: FLAG{YOU_HAVE_BEEN_TRAPPED_BY_CYBER_SHIELD_HONEYPOT}",
+                b"",
+                b"Intruder Telemetry Logged Successfully.",
+                b"All actions are monitored and reported to Cyber Ops.",
+            ]
+            pdf_bytes = self.generate_pdf_from_scratch(decoy_lines)
+            import base64
+            pdf_base64 = base64.b64encode(pdf_bytes).decode('ascii')
             return {
                 "status": "success",
-                "filename": "classified_financials.csv",
-                "content": "Date,Revenue,Expense\n2026-Q1,$15,482,900,$12,883,000\n2026-Q2,$18,910,200,$13,109,200\n2026-Q3,$24,800,000,$18,922,000\nTotal,$59,193,100,$44,914,200\n(DECOY FINANCIAL RECORDS - ACTIVE MONITORING TRAP)",
+                "filename": "decoy_financials.pdf",
+                "pdf_data": pdf_base64,
+                "content": "Date,Revenue,Expense\n2026-Q1,$15,482,900,$12,883,000\nTotal,$59,193,100,$44,914,200\n(DECOY FINANCIAL RECORDS - ACTIVE MONITORING TRAP)",
                 "honey_flag": "FLAG{YOU_HAVE_BEEN_TRAPPED_BY_CYBER_SHIELD_HONEYPOT}"
             }
         else:

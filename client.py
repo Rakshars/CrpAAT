@@ -300,7 +300,7 @@ class AdaptiveSecureClient:
         """Simulates accessing confidential database files."""
         if not self.aes_key:
             self.log("ERROR", "Session key required.", Colors.RED)
-            return
+            return None
             
         payload = {"action": "get_classified_financials"}
         self.log("SECURE", "Requesting classified financials from confidential database...", Colors.CYAN)
@@ -308,15 +308,33 @@ class AdaptiveSecureClient:
         
         resp = self.receive_and_decrypt()
         if not resp:
-            return
+            return None
             
         if resp.get("status") == "success":
-            self.log("SECURE", f"SUCCESS! Received encrypted file: {resp.get('filename')}", Colors.GREEN)
-            print(f"{Colors.BOLD}{Colors.PURPLE}=== FILE CONTENT ===\n{resp.get('content')}\n===================={Colors.END}")
+            filename = resp.get("filename", "classified_financials.pdf")
+            pdf_b64 = resp.get("pdf_data", "")
+            
+            self.log("SECURE", f"SUCCESS! Received encrypted file: {filename}", Colors.GREEN)
+            
+            if pdf_b64:
+                import base64
+                try:
+                    pdf_bytes = base64.b64decode(pdf_b64)
+                    with open(filename, "wb") as f:
+                        f.write(pdf_bytes)
+                    self.log("SECURE", f"PDF file successfully saved locally to: {filename}", Colors.GREEN)
+                except Exception as e:
+                    self.log("ERROR", f"Failed to save PDF locally: {e}", Colors.RED)
+            
+            print(f"{Colors.BOLD}{Colors.PURPLE}=== FILE PREVIEW ===\n{resp.get('content')}\n===================={Colors.END}")
+            
             if "honey_flag" in resp:
                 print(f"{Colors.RED}{Colors.BOLD}⚠️ WARNING: Trap flag detected: {resp.get('honey_flag')} (Decoy Feeder Active!){Colors.END}")
+            
+            return resp
         else:
             self.log("DEFENSE", f"Access Denied: {resp.get('msg')}", Colors.RED)
+            return resp
 
     def do_tamper_demo(self):
         """Simulates MITM packet modification (HMAC failure)."""
