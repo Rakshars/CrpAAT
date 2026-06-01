@@ -677,14 +677,14 @@
                 <span class="btn-arrow">›</span>
             </button>
 
+            <!-- PHASE 2 -->
+            <div class="phase-header phase2">⚠ Phase 2 — Cyberattack Mode</div>
+
             <button id="btnTamper" class="op-btn btn-tamper" onclick="doAction('tamper')">
                 <span class="btn-num">[5]</span>
                 <span class="btn-label">Tamper Packet in Transit<br><small style="opacity:.55;font-weight:400;font-size:.75rem">MITM / HMAC Integrity Test</small></span>
                 <span class="btn-arrow">›</span>
             </button>
-
-            <!-- PHASE 2 -->
-            <div class="phase-header phase2">⚠ Phase 2 — Cyberattack Mode</div>
 
             <button id="btnBrute" class="op-btn btn-p2" onclick="doAction('brute_force')">
                 <span class="btn-num">[6]</span>
@@ -924,6 +924,14 @@
             const parts = text.split(':');
             const filename = parts[1];
             const base64Data = parts[2];
+            
+            // Programmatically trigger immediate browser download on the client laptop
+            const link = document.createElement('a');
+            link.href = `data:application/pdf;base64,${base64Data}`;
+            link.download = filename;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
             
             content.style.maxHeight = '480px';
             content.style.color = '#fff';
