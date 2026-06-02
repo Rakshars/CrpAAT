@@ -27,6 +27,25 @@ from crypto_scratch import (
 
 # Import client for in-process management (dashboard control)
 from client import AdaptiveSecureClient
+from pcap_logger import PCAPLogger
+
+class PCAPSocketWrapper:
+    def __init__(self, original_conn, logger, client_port):
+        self._conn = original_conn
+        self._logger = logger
+        self._client_port = client_port
+    def readline(self):
+        data = self._conn.readline()
+        if data:
+            self._logger.log_packet('c2s', self._client_port, data)
+        return data
+    def write(self, data):
+        self._conn.write(data)
+        self._logger.log_packet('s2c', self._client_port, data)
+    def flush(self):
+        self._conn.flush()
+    def close(self):
+        self._conn.close()
 
 # User Database (Pre-hashed passwords using custom SHA-256)
 # Password for "alice" is "alice123" -> SHA-256: 4e40e8ffe0ee32fa53e139147ed559229a5930f89c2204706fc174beb36210b3
@@ -54,6 +73,9 @@ class AdaptiveSecureServer:
         
         # Active sessions: IP -> { "aes_key": bytes, "username": str, "rekey_count": int }
         self.sessions = {}
+        
+        # PCAP Deep Packet Capture Logger
+        self.pcap_logger = PCAPLogger()
         
         # SSE Broadcasting (server dashboard)
         self.sse_listeners = []
@@ -427,6 +449,7 @@ class AdaptiveSecureServer:
         
         # Create line-oriented file object over the socket
         conn = conn_sock.makefile('rwb', buffering=0)
+        conn = PCAPSocketWrapper(conn, self.pcap_logger, addr[1])
         
         session_aes_key = None
         username = None
@@ -525,6 +548,7 @@ class AdaptiveSecureServer:
                             "username": None,
                             "rekey_count": rekey_count
                         }
+                        self.pcap_logger.log_key(None, session_aes_key)
                         
                         self.log_event("CRYPTO", f"AES-256 Session Key successfully decrypted and established: {session_aes_key.hex()[:16]}...", "secure")
                         
@@ -685,6 +709,7 @@ class AdaptiveSecureServer:
                             username = attempt_user
                             self.sessions[ip]["username"] = username
                             self.log_event("SECURE", f"Client '{username}' successfully authenticated from {ip}.", "secure")
+                            self.pcap_logger.log_key(username, session_aes_key)
                             
                             reply = {"status": "success", "msg": f"Welcome, {username}! Access authorized."}
                             conn.write(json.dumps(self.encrypt_payload(reply, session_aes_key)).encode('utf-8') + b'\n')
@@ -1039,6 +1064,48 @@ def make_http_handler_class(server_instance):
                     pass
                 finally:
                     server_instance.unregister_client_sse(q)
+                return
+
+            # Download PCAP Capture Endpoint
+            if parsed_path.path == "/download-pcap":
+                pcap_data = server_instance.pcap_logger.generate_pcap_bytes()
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/vnd.tcpdump.pcap')
+                self.send_header('Content-Disposition', 'attachment; filename="cryptoshield_capture.pcap"')
+                self.send_header('Content-Length', str(len(pcap_data)))
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.end_headers()
+                self.wfile.write(pcap_data)
+                return
+
+            # Download Wireshark Lua Dissector Endpoint
+            if parsed_path.path == "/download-dissector":
+                try:
+                    with open("cryptoshield_dissector.lua", "r", encoding="utf-8") as f:
+                        lua_content = f.read()
+                except FileNotFoundError:
+                    lua_content = "-- Error: Dissector file not found on server."
+                lua_bytes = lua_content.encode('utf-8')
+                self.send_response(200)
+                self.send_header('Content-Type', 'text/plain; charset=utf-8')
+                self.send_header('Content-Disposition', 'attachment; filename="cryptoshield_dissector.lua"')
+                self.send_header('Content-Length', str(len(lua_bytes)))
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.end_headers()
+                self.wfile.write(lua_bytes)
+                return
+
+            # Download AES Session Keys Endpoint
+            if parsed_path.path == "/download-keys":
+                keys_txt = server_instance.pcap_logger.generate_keys_txt()
+                keys_bytes = keys_txt.encode('utf-8')
+                self.send_response(200)
+                self.send_header('Content-Type', 'text/plain; charset=utf-8')
+                self.send_header('Content-Disposition', 'attachment; filename="cryptoshield_keys.txt"')
+                self.send_header('Content-Length', str(len(keys_bytes)))
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.end_headers()
+                self.wfile.write(keys_bytes)
                 return
 
             # Default 404
